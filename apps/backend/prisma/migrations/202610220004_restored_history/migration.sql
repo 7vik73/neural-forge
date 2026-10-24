@@ -1,0 +1,1 @@
+ALTER TABLE "Run" ADD COLUMN "restoredAt" TIMESTAMP(3);

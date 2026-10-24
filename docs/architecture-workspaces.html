@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Neural Forge — accounts and private workspaces review</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        background: #f4f6f1;
+        color: #21362d;
+        font:
+          16px/1.6 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1060px;
+        margin: auto;
+        padding: 48px 24px;
+      }
+      h1 {
+        font-size: 38px;
+        line-height: 1.2;
+      }
+      h2 {
+        font-size: 23px;
+      }
+      article {
+        background: white;
+        border: 1px solid #d6dfd4;
+        border-radius: 16px;
+        padding: 28px;
+        margin: 24px 0;
+      }
+      .pair {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+      .box {
+        border: 2px solid #cbd6cb;
+        border-radius: 12px;
+        padding: 20px;
+      }
+      .deep {
+        background: #203c30;
+        color: white;
+        border-color: #203c30;
+      }
+      .tag {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #55725c;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+      td,
+      th {
+        text-align: left;
+        padding: 12px;
+        border-bottom: 1px solid #d6dfd4;
+        vertical-align: top;
+      }
+      code {
+        background: #eaf0e6;
+        color: #264d36;
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      .deep code {
+        background: #355440;
+        color: white;
+      }
+      .note {
+        background: #edf5e7;
+        padding: 16px;
+        border-radius: 10px;
+      }
+      @media (max-width: 700px) {
+        .pair {
+          grid-template-columns: 1fr;
+        }
+        main {
+          padding: 24px 14px;
+        }
+        h1 {
+          font-size: 30px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="tag">Independent architecture review · 22 October 2026</p>
+      <h1>Accounts and private workspaces</h1>
+      <p>
+        The single-owner engine now supports invited accounts with several private workspaces each.
+        Administrator access manages accounts and installation settings without granting content
+        access to another owner’s workspace.
+      </p>
+      <article>
+        <h2>Chosen architecture</h2>
+        <div class="pair">
+          <section class="box">
+            <h3>Before</h3>
+            <p>
+              One owner session → installation-wide feature services → shared automation records and
+              local folder.
+            </p>
+            <p>
+              Ownership was implicit. Every additional account would have needed its own filtering
+              conventions.
+            </p>
+          </section>
+          <section class="box deep">
+            <h3>After</h3>
+            <p>
+              Account session → workspace authorization →
+              <strong>mandatory context and fenced persistence</strong> → automation services.
+            </p>
+            <p>
+              Queue job → persisted execution target → the same workspace context. Composite foreign
+              keys preserve the boundary in PostgreSQL.
+            </p>
+            <p>
+              Small interfaces: <code>withWorkspace</code>, <code>owned</code>,
+              <code>WorkspaceFiles</code>, <code>backup/restore</code>.
+            </p>
+          </section>
+        </div>
+        <p>
+          This deepens the persistence and storage modules. Callers receive one clear workspace
+          interface; ownership checks stay local to the boundary and remain active inside
+          transactions. No context fails closed. The explicitly named system client is restricted to
+          initial target resolution, account administration, migration and maintenance.
+        </p>
+      </article>
+      <article>
+        <h2>Module seams and leverage</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Module</th>
+              <th>Interface and hidden behavior</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Accounts</td>
+              <td>
+                Invitations, session issuance, lifecycle and recovery. User-row locking serializes
+                password checks, session creation and revocation; an administrator lock protects the
+                last active admin.
+              </td>
+              <td>
+                Single-use/expired tokens, concurrent recovery/login, password replacement,
+                last-admin and suspension tests.
+              </td>
+            </tr>
+            <tr>
+              <td>Workspace context</td>
+              <td>
+                Request/worker context fences automation reads and writes, nested IDs and
+                transactions. Context is outside the portable graph.
+              </td>
+              <td>
+                Known-ID API attacks, same-owner boundaries, no-context errors, composite FK
+                rejection and forged queue payload tests.
+              </td>
+            </tr>
+            <tr>
+              <td>Storage and lifecycle</td>
+              <td>
+                Server-generated folder identities; confined file adapter; 30-day trash;
+                cancellation and lease settlement before purge; verified resumable legacy copying.
+              </td>
+              <td>
+                Directory isolation/traversal, trash/restore/purge, expiry cleanup,
+                source-preserving migration tests.
+              </td>
+            </tr>
+            <tr>
+              <td>Backups</td>
+              <td>
+                Private workspace archives exclude account state. Import remaps typed references and
+                IDs, re-encrypts credentials, disables workflows and preserves history without
+                resuming it.
+              </td>
+              <td>
+                Encrypted round-trip, fresh identities, no credentials/account-state crossover and
+                restored-run retry rejection.
+              </td>
+            </tr>
+            <tr>
+              <td>UI navigation</td>
+              <td>
+                Workspace URLs and a save-before-switch boundary. Account, workspace and
+                installation settings have distinct ownership.
+              </td>
+              <td>
+                Invitation journey, separate tabs, independent notes/connections, pending edit
+                switch, trash and restoration browser checks.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </article>
+      <article>
+        <h2>Review findings and corrections</h2>
+        <p>
+          <strong>Resolved P1 — recovery/session race.</strong> Earlier login verified a password
+          before a separate session insert. Recovery could revoke sessions in the gap. Verification
+          and insertion now hold the same user-row lock as recovery, suspension and password
+          changes. A controlled concurrent test queues recovery ahead of an old-password login and
+          verifies rejection with no surviving session.
+        </p>
+        <p>
+          <strong>Resolved P2 — restored retries with old resource IDs.</strong> Imported execution
+          payloads are historical snapshots. Failed runs could previously retry against stale note
+          IDs. Each imported run is now marked with <code>restoredAt</code>, retry is rejected by
+          the engine, and the UI explains history-only status. New runs use the remapped workflow
+          definition.
+        </p>
+        <p>
+          The reviewer withdrew an initial reconciliation concern after confirming the current
+          throttle is keyed by workspace. The targeted follow-up confirmed both fixes and reported
+          no further concrete issue. No confirmed cross-workspace content escape was found in the
+          reviewed API fences, worker resolution, composite constraints or stream revocation.
+        </p>
+      </article>
+      <article>
+        <h2>Verification and remaining gates</h2>
+        <p>
+          34 unit/interface tests and 36 real PostgreSQL integration tests passed, including actual
+          native Ollama summary and workflow generation. The Chromium suite checks the original
+          workflow builder and the full account/workspace journey. Container production builds and
+          typechecking pass on the development macOS ARM64 machine.
+        </p>
+        <p class="note">
+          Independent review and automated checks support the implementation; clean Windows/Linux
+          installations, AMD64 runtime, real provider-account tests, cross-machine full restore and
+          first-time-user trials remain release gates. See
+          <a href="testing.md">the verification record</a>.
+        </p>
+      </article>
+      <p>
+        Decision: <a href="adr/003-private-workspaces.md">ADR-003</a>. Domain vocabulary:
+        <a href="../GLOSSARY.md">GLOSSARY</a>. Original engine review:
+        <a href="architecture-review.html">architecture-review.html</a>.
+      </p>
+    </main>
+  </body>
+</html>

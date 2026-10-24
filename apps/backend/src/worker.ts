@@ -1,0 +1,13 @@
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module.js';
+import { Database } from './database.js';
+import { migrateLegacyFiles } from './storage.js';
+import { Runtime } from './runtime.js';
+import { requireConfig } from './config.js';
+requireConfig();
+const app = await NestFactory.createApplicationContext(AppModule);
+app.enableShutdownHooks();
+await migrateLegacyFiles(app.get(Database));
+await app.get(Runtime).start();
+console.log('Workflow worker ready.');

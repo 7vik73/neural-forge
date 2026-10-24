@@ -1,0 +1,306 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+model Installation {
+  id           String @id @default("owner")
+  settings     Json
+  createdAt    DateTime @default(now())
+}
+model Session {
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String @id
+  expiresAt DateTime
+}
+model Workflow {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id             String @id @default(uuid())
+  name           String
+  description    String @default("")
+  draft          Json
+  revision       Int @default(0)
+  publishedId    String?
+  enabled        Boolean @default(false)
+  webhookHash    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  versions       WorkflowVersion[]
+  runs           Run[]
+  checkpoints    Checkpoint[]
+}
+model WorkflowVersion {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id         String @id @default(uuid())
+  workflowId String
+  number     Int
+  definition Json
+  createdAt  DateTime @default(now())
+  workflow   Workflow @relation(fields: [workspaceId, workflowId], references: [workspaceId, id], onDelete: Cascade)
+  @@unique([workflowId, number])
+}
+model Run {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id         String @id @default(uuid())
+  workflowId String
+  versionId  String?
+  status     String @default("queued")
+  preview    Boolean @default(false)
+  triggerKey String? @unique
+  input      Json
+  error      String?
+  createdAt  DateTime @default(now())
+  finishedAt DateTime?
+  restoredAt DateTime?
+  workflow   Workflow @relation(fields: [workspaceId, workflowId], references: [workspaceId, id], onDelete: Cascade)
+  scopes     RunScope[]
+  nodes      NodeExecution[]
+  events     ExecutionEvent[]
+  @@index([createdAt])
+}
+model RunScope {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id            String @id @default(uuid())
+  runId         String
+  key           String
+  definition    Json
+  input         Json
+  parentTaskId  String?
+  itemIndex     Int @default(0)
+  status        String @default("running")
+  output        Json?
+  run           Run @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade)
+  @@unique([runId, key])
+}
+model NodeExecution {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id         String @id @default(uuid())
+  runId      String
+  scope      String @default("root")
+  nodeId     String
+  status     String @default("pending")
+  reason     String?
+  attempt    Int @default(0)
+  input      Json?
+  output     Json?
+  error      String?
+  wakeAt     DateTime?
+  leaseUntil DateTime?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  run        Run @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade)
+  attempts   NodeAttempt[]
+  @@unique([runId, scope, nodeId])
+  @@index([status, wakeAt])
+}
+model NodeAttempt {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id         String @id @default(uuid())
+  taskId     String
+  number     Int
+  status     String
+  error      String?
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+  task       NodeExecution @relation(fields: [workspaceId, taskId], references: [workspaceId, id], onDelete: Cascade)
+  @@unique([taskId, number])
+}
+model ExecutionEvent {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id        BigInt @id @default(autoincrement())
+  runId     String
+  type      String
+  data      Json
+  createdAt DateTime @default(now())
+  run       Run @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade)
+  @@index([runId, id])
+}
+model Outbox {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id        String @id @default(uuid())
+  kind      String
+  payload   Json
+  notBefore DateTime @default(now())
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  @@index([sentAt, notBefore])
+}
+model Connection {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id        String @id @default(uuid())
+  name      String
+  kind      String
+  secret    String
+  status    String @default("untested")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model Checkpoint {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id         String @id @default(uuid())
+  workflowId String
+  value      Json
+  updatedAt  DateTime @updatedAt
+  workflow   Workflow @relation(fields: [workspaceId, workflowId], references: [workspaceId, id], onDelete: Cascade)
+  @@unique([workflowId])
+}
+model SourceCheckpoint {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id        String @id
+  value     Json
+  revision  Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+model Note {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id         String @id @default(uuid())
+  title      String
+  text       String
+  effectKey  String? @unique
+  lastRunId  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+model Artifact {
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+  @@unique([workspaceId, id])
+  id        String @id @default(uuid())
+  runId     String
+  nodeId    String
+  kind      String
+  metadata  Json
+  createdAt DateTime @default(now())
+  @@index([runId])
+}
+
+model User {
+  id String @id @default(uuid())
+  username String @unique
+  displayName String
+  passwordHash String
+  isAdmin Boolean @default(false)
+  status String @default("active")
+  mustCompleteProfile Boolean @default(false)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  sessions Session[]
+  workspaces Workspace[]
+  tokens AccountToken[]
+  memberships WorkspaceMember[]
+}
+model Workspace {
+  id String @id @default(uuid())
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name String
+  settings Json
+  storageKey String @unique @default(uuid())
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([ownerId, deletedAt])
+  workflows Workflow[]
+  workflowVersions WorkflowVersion[]
+  runs Run[]
+  runScopes RunScope[]
+  nodeExecutions NodeExecution[]
+  nodeAttempts NodeAttempt[]
+  executionEvents ExecutionEvent[]
+  outboxs Outbox[]
+  connections Connection[]
+  checkpoints Checkpoint[]
+  sourceCheckpoints SourceCheckpoint[]
+  notes Note[]
+  artifacts Artifact[]
+  members WorkspaceMember[]
+  aiUsage AIUsage[]
+}
+model AccountToken {
+  id String @id
+  purpose String
+  username String?
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  connectionId String?
+  createdById String?
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([purpose, expiresAt])
+}
+model FileMigration {
+  workspaceId String @id
+  completedAt DateTime?
+  manifest Json
+}
+
+model WorkspaceMember {
+  workspaceId String
+  userId String
+  role String
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+model AppCredential {
+  provider String @id
+  secret String
+  updatedAt DateTime @updatedAt
+}
+model AIUsage {
+  id String @id @default(uuid())
+  workspaceId String @default(dbgenerated())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider String
+  model String
+  durationMs Int
+  inputTokens Int?
+  outputTokens Int?
+  outcome String
+  createdAt DateTime @default(now())
+  @@index([workspaceId, createdAt])
+}

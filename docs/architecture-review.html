@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Neural Forge architecture review</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'strict' });
+    </script>
+    <style>
+      body {
+        background: #f8faf5;
+        color: #263c2d;
+        font: 15px system-ui;
+        margin: 0;
+      }
+      main {
+        max-width: 1050px;
+        margin: auto;
+        padding: 48px 25px;
+      }
+      article {
+        background: white;
+        border: 1px solid #dfe7d8;
+        border-radius: 12px;
+        padding: 27px;
+        margin: 24px 0;
+      }
+      .diagrams {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin: 20px 0;
+      }
+      .diagram {
+        border: 1px dashed #c9d6c0;
+        border-radius: 7px;
+        padding: 18px;
+        min-height: 105px;
+      }
+      .after {
+        background: #294332;
+        color: white;
+        border: 3px solid #294332;
+      }
+      h1 {
+        font-size: 32px;
+      }
+      h2 {
+        font-size: 21px;
+      }
+      p {
+        line-height: 1.7;
+      }
+      .badge {
+        color: #477947;
+        background: #e8f4e4;
+        border-radius: 5px;
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+      .files {
+        font: 11px monospace;
+        color: #8c9b7d;
+        margin: 14px 0;
+      }
+      small {
+        display: block;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-size: 9px;
+      }
+      footer {
+        padding: 24px;
+        border: 1px solid #dbe5d1;
+        background: #eef5e8;
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Neural Forge architecture review</h1>
+        <p>22 October 2026 · Independent code walk and regression review</p>
+        <span class="badge">All confirmed findings addressed</span>
+        <p>Solid boxes: modules · Dashed boxes: seams · Dark boxes: deep implementations</p>
+      </header>
+      <article id="finding-0">
+        <h2>Keep run recovery inside the execution module</h2>
+        <p>
+          <span class="badge">Strong · corrected</span>
+          <span class="badge">local-substitutable</span>
+        </p>
+        <div class="files">apps/backend/src/engine.ts · runtime.ts</div>
+        <div class="diagrams">
+          <div class="diagram">
+            <small>Before</small>PostgreSQL run → one queue delivery → stranded run after queue loss
+          </div>
+          <div class="diagram after">
+            <small>After</small>PostgreSQL run → execution reconciliation → durable outbox →
+            repeatable queue delivery
+          </div>
+        </div>
+        <p><strong>Problem:</strong> Queue delivery success was mistaken for execution progress.</p>
+        <p>
+          <strong>Solution:</strong> Reconstruct dispatches from unfinished runs and pending nodes
+          through one execution interface.
+        </p>
+        <ul>
+          <li>Locality: recovery rules stay together</li>
+          <li>Leverage: restarts and queue loss share recovery</li>
+        </ul>
+      </article>
+      <article id="finding-1">
+        <h2>Bind schedule occurrences to published versions</h2>
+        <p>
+          <span class="badge">Strong · corrected</span>
+          <span class="badge">local-substitutable</span>
+        </p>
+        <div class="files">apps/backend/src/runtime.ts · engine.ts</div>
+        <div class="diagrams">
+          <div class="diagram">
+            <small>Before</small>Old schedule job → current workflow version
+          </div>
+          <div class="diagram after">
+            <small>After</small>Versioned occurrence → version check under lock → matching run
+          </div>
+        </div>
+        <p><strong>Problem:</strong> A retained schedule job could cross the version seam.</p>
+        <p>
+          <strong>Solution:</strong> Carry a version identity and check it atomically before
+          creating a run.
+        </p>
+        <ul>
+          <li>Version invariants stay local</li>
+          <li>Obsolete occurrences are rejected</li>
+        </ul>
+      </article>
+      <article id="finding-2">
+        <h2>Compile AI proposals through one graph interface</h2>
+        <p>
+          <span class="badge">Strong · corrected</span>
+          <span class="badge">local-substitutable</span>
+        </p>
+        <div class="files">apps/backend/src/ai.ts · packages/workflow</div>
+        <div class="diagrams">
+          <div class="diagram">
+            <small>Before</small>Model JSON → caller-supplied IDs and wiring → inconsistent graph
+          </div>
+          <div class="diagram after">
+            <small>After</small>Typed proposal → unique-ID compiler → graph validation → editable
+            draft
+          </div>
+        </div>
+        <p>
+          <strong>Problem:</strong> Small local models made callers responsible for graph details.
+        </p>
+        <p>
+          <strong>Solution:</strong> Keep ID allocation, references, defaults, and validation inside
+          the proposal implementation.
+        </p>
+        <ul>
+          <li>Leverage: one compiler for every proposal</li>
+          <li>Locality: repair and validation concentrate</li>
+        </ul>
+      </article>
+      <article id="finding-3">
+        <h2>Concentrate backup portability in the backup module</h2>
+        <p>
+          <span class="badge">Strong · corrected</span>
+          <span class="badge">local-substitutable</span>
+        </p>
+        <div class="files">apps/backend/src/backups.ts · scripts/manage.mjs</div>
+        <div class="diagrams">
+          <div class="diagram">
+            <small>Before</small>Restore → workflow-only emptiness check → existing notes
+            overwritten
+          </div>
+          <div class="diagram after">
+            <small>After</small>Restore → complete emptiness check → credential re-encryption →
+            disabled drafts
+          </div>
+        </div>
+        <p><strong>Problem:</strong> Restore preconditions did not cover all stored data.</p>
+        <p>
+          <strong>Solution:</strong> Own target checks and authenticated encryption behind one
+          restore interface.
+        </p>
+        <ul>
+          <li>Tests cross the restore interface</li>
+          <li>Credentials survive installation-key changes</li>
+        </ul>
+      </article>
+      <article id="finding-4">
+        <h2>Share one Telegram inbox across subscribers</h2>
+        <p>
+          <span class="badge">Strong · corrected</span>
+          <span class="badge">local-substitutable</span>
+        </p>
+        <div class="files">apps/backend/src/polling.ts · prisma/schema.prisma</div>
+        <div class="diagrams">
+          <div class="diagram">
+            <small>Before</small>Workflow A cursor → provider acknowledgement ← Workflow B cursor
+          </div>
+          <div class="diagram after">
+            <small>After</small>Shared source checkpoint → transactional fan-out → independent runs
+          </div>
+        </div>
+        <p>
+          <strong>Problem:</strong> Provider acknowledgement semantics leaked into each workflow.
+        </p>
+        <p>
+          <strong>Solution:</strong> One polling implementation owns the source position and commits
+          subscriber runs with it. Telegram connections reject duplicate tokens, reset the source
+          cursor on token replacement, and compare credential snapshots before committing in-flight
+          results.
+        </p>
+        <ul>
+          <li>Locality: acknowledgement rules stay together</li>
+          <li>Leverage: one inbox feeds many workflows</li>
+        </ul>
+      </article>
+      <article id="finding-5">
+        <h2>Keep export and retention rules complete</h2>
+        <p>
+          <span class="badge">Strong · corrected</span>
+          <span class="badge">local-substitutable</span>
+        </p>
+        <div class="files">packages/workflow/src/index.ts · apps/backend/src/engine.ts</div>
+        <div class="diagrams">
+          <div class="diagram">
+            <small>Before</small>Root-only export / successful-attempt-only retention
+          </div>
+          <div class="diagram after">
+            <small>After</small>Recursive export / all terminal run outcomes
+          </div>
+        </div>
+        <p>
+          <strong>Problem:</strong> Policies stopped at shallow paths through nested execution data.
+        </p>
+        <p><strong>Solution:</strong> Walk scoped definitions and centralize terminal cleanup.</p>
+        <ul>
+          <li>Nested graphs use the same interface</li>
+          <li>Failure paths follow the same policy</li>
+        </ul>
+      </article>
+      <p>
+        Container verification also corrected custom Ollama ports: launcher setup derives
+        OLLAMA_GATEWAY_URL from the native URL, and the Docker Desktop overlay uses that value.
+      </p>
+      <section>
+        <h2>Current module relationships</h2>
+        <pre class="mermaid">
+flowchart LR
+UI[Guided forms and canvas] --> C[Workflow contracts]
+AI[Local AI proposal compiler] --> C
+C --> E[Execution module]
+E --> DB[(PostgreSQL state)]
+E --> O[Operation adapters]
+DB --> Q[Dispatch outbox]
+Q --> W[BullMQ worker]
+W --> E
+</pre
+        >
+      </section>
+      <footer>
+        <h2>Top recommendation</h2>
+        <p>
+          Keep future execution changes behind the existing execution interface and extend recovery
+          tests there. The current module depth provides leverage without adding speculative
+          abstractions.
+        </p>
+        <p>
+          Remaining release checks require live external accounts, additional operating systems, and
+          a five-person usability trial.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

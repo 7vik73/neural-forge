@@ -1,0 +1,23 @@
+name: Build portable images
+on: workflow_dispatch
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { target: [backend, web] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Containerfile
+          target: ${{ matrix.target }}
+          tags: neural-forge-${{ matrix.target }}:0.1.0
+          platforms: linux/amd64,linux/arm64
+          outputs: type=oci,dest=/tmp/neural-forge-${{ matrix.target }}.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neural-forge-${{ matrix.target }}-images
+          path: /tmp/neural-forge-${{ matrix.target }}.tar

@@ -1,0 +1,115 @@
+name: neural-forge-local
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports: ['127.0.0.1:45432:5432']
+    volumes: ['postgres:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7.4.6-alpine
+    command:
+      [
+        'sh',
+        '-c',
+        'exec redis-server --appendonly yes --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"',
+      ]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports: ['127.0.0.1:46379:6379']
+    volumes: ['redis:/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep PONG']
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+  migrate:
+    profiles: ['app']
+    image: neural-forge-backend:${FORGE_VERSION:-0.1.0}
+    network_mode: host
+    env_file: .env
+    working_dir: /app/apps/backend
+    command:
+      [
+        'sh',
+        '-c',
+        'node node_modules/prisma/build/index.js migrate deploy && node dist/migrate-storage.js',
+      ]
+    environment:
+      LOCAL_FOLDER: /workspace/legacy
+      WORKSPACE_STORAGE_ROOT: /workspace/workspaces
+    volumes:
+      [
+        '${LOCAL_FOLDER:-./.local/files}:/workspace/legacy:ro',
+        '${WORKSPACE_STORAGE_ROOT:-./.local/workspaces}:/workspace/workspaces',
+      ]
+    depends_on:
+      postgres: { condition: service_healthy }
+  api:
+    profiles: ['app']
+    image: neural-forge-backend:${FORGE_VERSION:-0.1.0}
+    build: { context: ., dockerfile: infra/Containerfile, target: backend }
+    network_mode: host
+    env_file: .env
+    environment:
+      WORKSPACE_STORAGE_ROOT: /workspace/workspaces
+    volumes: ['${WORKSPACE_STORAGE_ROOT:-./.local/workspaces}:/workspace/workspaces']
+    command: ['node', 'apps/backend/dist/main.js']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4301/api/v1/system/bootstrap').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      retries: 20
+  worker:
+    profiles: ['app']
+    image: neural-forge-backend:${FORGE_VERSION:-0.1.0}
+    network_mode: host
+    env_file: .env
+    environment:
+      WORKSPACE_STORAGE_ROOT: /workspace/workspaces
+    volumes: ['${WORKSPACE_STORAGE_ROOT:-./.local/workspaces}:/workspace/workspaces']
+    command: ['node', 'apps/backend/dist/worker.js']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+  web:
+    profiles: ['app']
+    image: neural-forge-web:${FORGE_VERSION:-0.1.0}
+    build: { context: ., dockerfile: infra/Containerfile, target: web }
+    network_mode: host
+    environment:
+      HOSTNAME: 127.0.0.1
+      PORT: 4300
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4300').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+volumes:
+  postgres:
+  redis:

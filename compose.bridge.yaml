@@ -1,0 +1,32 @@
+# Docker Desktop fallback: use its private host gateway for native Ollama.
+# The launcher selects this automatically when host networking is disabled.
+services:
+  migrate:
+    network_mode: !reset null
+    networks: [default]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  api:
+    network_mode: !reset null
+    networks: [default]
+    ports: ['127.0.0.1:4301:4301']
+    environment:
+      FORGE_CONTAINER: '1'
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      OLLAMA_URL: ${OLLAMA_GATEWAY_URL:-http://host.docker.internal:11434}
+  worker:
+    network_mode: !reset null
+    networks: [default]
+    environment:
+      FORGE_CONTAINER: '1'
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      OLLAMA_URL: ${OLLAMA_GATEWAY_URL:-http://host.docker.internal:11434}
+  web:
+    network_mode: !reset null
+    networks: [default]
+    ports: ['127.0.0.1:4300:4300']
+    environment:
+      HOSTNAME: 0.0.0.0
+      API_URL: http://api:4301

@@ -1,0 +1,8 @@
+node_modules
+dist
+.next
+.local
+pnpm-lock.yaml
+test-results
+playwright-report
+apps/backend/prisma/migrations

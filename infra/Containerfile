@@ -1,0 +1,33 @@
+FROM node:24.18.0-bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN npm install --global pnpm@10.34.7 --fetch-retries=5
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml .npmrc tsconfig.base.json ./
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/workflow/package.json ./packages/workflow/package.json
+COPY packages/connectors/package.json ./packages/connectors/package.json
+COPY apps/backend/package.json ./apps/backend/package.json
+COPY apps/web/package.json ./apps/web/package.json
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
+COPY packages ./packages
+COPY apps ./apps
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm build
+
+FROM node:24.18.0-bookworm-slim AS backend
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages ./packages
+COPY --from=build /app/apps/backend ./apps/backend
+COPY --from=build /app/package.json ./package.json
+ENV NODE_ENV=production
+CMD ["node", "apps/backend/dist/main.js"]
+
+FROM node:24.18.0-bookworm-slim AS web
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=127.0.0.1 PORT=4300
+COPY --from=build /app/apps/web/.next/standalone ./
+COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /app/apps/web/public ./apps/web/public
+CMD ["node", "apps/web/server.js"]
